@@ -1,10 +1,11 @@
 # go-md-jira
 
-A Go library and command-line tool for converting Markdown to Jira markup format. Inspired by https://github.com/eshack94/md-to-jira
+A high-performance Go library and command-line tool for converting Markdown to Jira markup format and Atlassian Document Format (ADF). 
 
 ## Features
 
 - **Fast Performance**: Pre-compiled regex patterns for optimal conversion speed
+- **Multiple Output Formats**: Jira markup and Atlassian Document Format (ADF) JSON
 - **Comprehensive Conversion**: Headers, lists, text formatting, code blocks, and links
 - **Smart Protection**: Placeholder-based system prevents formatting conflicts
 - **Nested Lists**: Proper handling of multi-level ordered and unordered lists
@@ -20,12 +21,42 @@ A Go library and command-line tool for converting Markdown to Jira markup format
 git clone https://github.com/dja852/go-md-jira.git
 cd go-md-jira
 
-# Convert a markdown file
+# Convert to Jira markup (default)
 go run ./cmd input.md
+go run ./cmd -format=jira input.md
+
+# Convert to Atlassian Document Format (ADF) JSON
+go run ./cmd -format=adf input.md
+go run ./cmd -f adf input.md
+
+# Show help
+go run ./cmd --help
 
 # Or build and run
 go build -o md2jira ./cmd
-./md2jira input.md
+./md2jira input.md                    # Jira format (default)
+./md2jira -f adf input.md             # ADF format
+```
+
+#### CLI Options
+
+- `-format` or `-f`: Output format (`jira` or `adf`, default: `jira`)
+- `-help` or `-h`: Show help message
+
+#### CLI Examples
+
+```bash
+# Convert to Jira markup
+./md2jira document.md
+./md2jira -format=jira document.md
+
+# Convert to ADF JSON
+./md2jira -format=adf document.md  
+./md2jira -f adf document.md
+
+# Redirect output to file
+./md2jira document.md > output.jira
+./md2jira -f adf document.md > output.json
 ```
 
 ### Library Usage
@@ -63,6 +94,20 @@ This is **bold** and _italic_ text with {{inline code}}.
     if err := gomdjira.MarkdownToJira("input.md"); err != nil {
         log.Fatal(err)
     }
+    
+    // Convert to Atlassian Document Format (ADF)
+    adfJSON, err := gomdjira.ConvertMarkdownStringToADFJSON(markdown)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("ADF JSON:", adfJSON)
+    
+    // Convert file to ADF structure
+    adf, err := gomdjira.ConvertMarkdownFileToADF("input.md")
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("ADF Document: %+v\n", adf)
 }
 ```
 
@@ -73,6 +118,8 @@ go get github.com/dja852/go-md-jira
 ```
 
 ## Conversion Examples
+
+### Jira Markup Output
 
 | Markdown | Jira Markup | Description |
 |----------|-------------|-------------|
@@ -134,6 +181,42 @@ func main() {
 Visit [GitHub|https://github.com/example/repo] for more info.
 ```
 
+### Atlassian Document Format (ADF) Output
+
+The same markdown also converts to ADF JSON format:
+
+**ADF JSON Output (excerpt):**
+```json
+{
+  "version": 1,
+  "type": "doc",
+  "content": [
+    {
+      "type": "heading",
+      "attrs": { "level": 1 },
+      "content": [
+        { "type": "text", "text": "Project Documentation" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        { "type": "text", "text": "This project uses " },
+        { "type": "text", "text": "Go", "marks": [{"type": "strong"}] },
+        { "type": "text", "text": " and supports " },
+        { "type": "text", "text": "multiple formats", "marks": [{"type": "em"}] }
+      ]
+    },
+    {
+      "type": "codeBlock",
+      "content": [
+        { "type": "text", "text": "func main() {\n    fmt.Println(\"Hello, World!\")\n}" }
+      ]
+    }
+  ]
+}
+```
+
 ## API Reference
 
 ### Core Functions
@@ -171,6 +254,54 @@ Converts a markdown file and writes output to a custom writer.
 **Parameters:**
 - `inputPath`: Path to the markdown file
 - `writer`: io.Writer to receive the output
+
+**Returns:**
+- Error if file operations fail, nil on success
+
+### Atlassian Document Format (ADF) Functions
+
+#### `ConvertMarkdownStringToADF(markdown string) (*ADFDocument, error)`
+Converts a markdown string to Atlassian Document Format (ADF) structure.
+
+**Parameters:**
+- `markdown`: Input markdown text
+
+**Returns:**
+- ADF document structure and error if conversion fails
+
+#### `ConvertMarkdownStringToADFJSON(markdown string) (string, error)`
+Converts a markdown string to ADF JSON format.
+
+**Parameters:**
+- `markdown`: Input markdown text
+
+**Returns:**
+- JSON string in ADF format and error if conversion fails
+
+#### `ConvertMarkdownFileToADF(filePath string) (*ADFDocument, error)`
+Reads a markdown file and converts it to ADF structure.
+
+**Parameters:**
+- `filePath`: Path to the markdown file
+
+**Returns:**
+- ADF document structure and error if file operations fail
+
+#### `ConvertMarkdownFileToADFJSON(filePath string) (string, error)`
+Reads a markdown file and converts it to ADF JSON format.
+
+**Parameters:**
+- `filePath`: Path to the markdown file
+
+**Returns:**
+- JSON string in ADF format and error if file operations fail
+
+#### `MarkdownToADFWriter(filePath string, writer io.Writer) error`
+Converts a markdown file to ADF JSON and writes to the specified writer.
+
+**Parameters:**
+- `filePath`: Path to the markdown file
+- `writer`: io.Writer to receive the ADF JSON output
 
 **Returns:**
 - Error if file operations fail, nil on success

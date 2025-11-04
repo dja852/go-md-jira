@@ -1,6 +1,7 @@
 package gomdjira
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -128,5 +129,92 @@ func TestConvertMarkdownFile(t *testing.T) {
 	_, err = ConvertMarkdownFile("nonexistent.md")
 	if err == nil {
 		t.Error("Expected error for non-existent file")
+	}
+}
+
+func TestConvertMarkdownStringToADF(t *testing.T) {
+	markdown := `# Header 1
+## Header 2
+
+This is **bold** text and *italic* text.
+
+Here's a [link](https://example.com) and some ` + "`inline code`" + `.
+
+- List item 1
+- List item 2
+
+1. Ordered item 1
+2. Ordered item 2
+
+` + "```go" + `
+func main() {
+    fmt.Println("Hello, World!")
+}
+` + "```"
+
+	adf, err := ConvertMarkdownStringToADF(markdown)
+	if err != nil {
+		t.Fatalf("ConvertMarkdownStringToADF failed: %v", err)
+	}
+
+	// Basic structure checks
+	if adf.Version != 1 {
+		t.Error("ADF version should be 1")
+	}
+	if adf.Type != "doc" {
+		t.Error("ADF type should be 'doc'")
+	}
+	if len(adf.Content) == 0 {
+		t.Error("ADF content should not be empty")
+	}
+
+	// Check for headers
+	hasH1 := false
+	hasH2 := false
+	for _, node := range adf.Content {
+		if node.Type == "heading" {
+			if level, ok := node.Attrs["level"].(int); ok {
+				if level == 1 {
+					hasH1 = true
+				}
+				if level == 2 {
+					hasH2 = true
+				}
+			}
+		}
+	}
+	if !hasH1 {
+		t.Error("Should have H1 header")
+	}
+	if !hasH2 {
+		t.Error("Should have H2 header")
+	}
+}
+
+func TestConvertMarkdownStringToADFJSON(t *testing.T) {
+	markdown := `# Test Header
+
+This is a **test** with ` + "`code`" + `.`
+
+	jsonResult, err := ConvertMarkdownStringToADFJSON(markdown)
+	if err != nil {
+		t.Fatalf("ConvertMarkdownStringToADFJSON failed: %v", err)
+	}
+
+	// Basic JSON structure checks
+	if !strings.Contains(jsonResult, `"version": 1`) {
+		t.Error("JSON should contain version")
+	}
+	if !strings.Contains(jsonResult, `"type": "doc"`) {
+		t.Error("JSON should contain doc type")
+	}
+	if !strings.Contains(jsonResult, `"type": "heading"`) {
+		t.Error("JSON should contain heading")
+	}
+
+	// Should be valid JSON
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonResult), &parsed); err != nil {
+		t.Errorf("Result should be valid JSON: %v", err)
 	}
 }

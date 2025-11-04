@@ -1,6 +1,7 @@
 package gomdjira
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -181,6 +182,350 @@ func MarkdownToJiraWriter(filePath string, writer io.Writer) error {
 
 	result := ConvertMarkdownString(string(contentBytes))
 	_, err = fmt.Fprintln(writer, result)
+	if err != nil {
+		return fmt.Errorf("could not write output: %w", err)
+	}
+
+	return nil
+}
+
+// ADF (Atlassian Document Format) structures
+type ADFDocument struct {
+	Version int       `json:"version"`
+	Type    string    `json:"type"`
+	Content []ADFNode `json:"content"`
+}
+
+type ADFNode struct {
+	Type    string                 `json:"type"`
+	Attrs   map[string]interface{} `json:"attrs,omitempty"`
+	Content []ADFNode              `json:"content,omitempty"`
+	Text    string                 `json:"text,omitempty"`
+	Marks   []ADFMark              `json:"marks,omitempty"`
+}
+
+type ADFMark struct {
+	Type  string                 `json:"type"`
+	Attrs map[string]interface{} `json:"attrs,omitempty"`
+}
+
+// ConvertMarkdownStringToADF converts a markdown string to Atlassian Document Format (ADF).
+func ConvertMarkdownStringToADF(markdown string) (*ADFDocument, error) {
+	doc := &ADFDocument{
+		Version: 1,
+		Type:    "doc",
+		Content: []ADFNode{},
+	}
+
+	// Convert multiline elements first (code blocks)
+	convertedContent := convertMultilineElements(markdown)
+	lines := strings.Split(convertedContent, "\n")
+
+	var currentParagraph *ADFNode
+	inCodeBlock := false
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Handle empty lines
+		if line == "" {
+			if currentParagraph != nil && len(currentParagraph.Content) > 0 {
+				doc.Content = append(doc.Content, *currentParagraph)
+				currentParagraph = nil
+			}
+			continue
+		}
+
+		// Track code block boundaries
+		if strings.HasPrefix(line, "{code") {
+			if currentParagraph != nil && len(currentParagraph.Content) > 0 {
+				doc.Content = append(doc.Content, *currentParagraph)
+				currentParagraph = nil
+			}
+			inCodeBlock = true
+			continue
+		}
+		if line == "{code}" {
+			inCodeBlock = false
+			continue
+		}
+
+		if inCodeBlock {
+			// Add code block content
+			if len(doc.Content) == 0 || doc.Content[len(doc.Content)-1].Type != "codeBlock" {
+				codeBlock := ADFNode{
+					Type: "codeBlock",
+					Content: []ADFNode{
+						{
+							Type: "text",
+							Text: line,
+						},
+					},
+				}
+				doc.Content = append(doc.Content, codeBlock)
+			} else {
+				// Append to existing code block
+				lastBlock := &doc.Content[len(doc.Content)-1]
+				if len(lastBlock.Content) > 0 {
+					lastBlock.Content[0].Text += "\n" + line
+				}
+			}
+			continue
+		}
+
+		// Convert line to ADF nodes
+		node := convertLineToADF(line)
+		if node != nil {
+			if node.Type == "paragraph" {
+				if currentParagraph != nil && len(currentParagraph.Content) > 0 {
+					doc.Content = append(doc.Content, *currentParagraph)
+				}
+				doc.Content = append(doc.Content, *node)
+				currentParagraph = nil
+			} else if node.Type == "heading" || node.Type == "bulletList" || node.Type == "orderedList" {
+				if currentParagraph != nil && len(currentParagraph.Content) > 0 {
+					doc.Content = append(doc.Content, *currentParagraph)
+					currentParagraph = nil
+				}
+				doc.Content = append(doc.Content, *node)
+			} else {
+				// Text content - add to current paragraph
+				if currentParagraph == nil {
+					currentParagraph = &ADFNode{
+						Type:    "paragraph",
+						Content: []ADFNode{},
+					}
+				}
+				currentParagraph.Content = append(currentParagraph.Content, *node)
+			}
+		}
+	}
+
+	// Add any remaining paragraph
+	if currentParagraph != nil && len(currentParagraph.Content) > 0 {
+		doc.Content = append(doc.Content, *currentParagraph)
+	}
+
+	return doc, nil
+}
+
+// convertLineToADF converts a single line to ADF nodes.
+func convertLineToADF(line string) *ADFNode {
+	// Check for headers
+	for i := 6; i >= 1; i-- {
+		prefix := strings.Repeat("#", i) + " "
+		if strings.HasPrefix(line, prefix) {
+			text := strings.TrimSpace(line[len(prefix):])
+			return &ADFNode{
+				Type: "heading",
+				Attrs: map[string]interface{}{
+					"level": i,
+				},
+				Content: []ADFNode{
+					{
+						Type: "text",
+						Text: text,
+					},
+				},
+			}
+		}
+	}
+
+	// Check for lists
+	if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") {
+		text := strings.TrimSpace(line[2:])
+		return &ADFNode{
+			Type: "bulletList",
+			Content: []ADFNode{
+				{
+					Type: "listItem",
+					Content: []ADFNode{
+						{
+							Type:    "paragraph",
+							Content: parseInlineFormatting(text),
+						},
+					},
+				},
+			},
+		}
+	}
+
+	// Check for ordered lists
+	if orderedListRegex.MatchString(line) {
+		text := orderedListRegex.ReplaceAllString(line, "")
+		return &ADFNode{
+			Type: "orderedList",
+			Content: []ADFNode{
+				{
+					Type: "listItem",
+					Content: []ADFNode{
+						{
+							Type:    "paragraph",
+							Content: parseInlineFormatting(text),
+						},
+					},
+				},
+			},
+		}
+	}
+
+	// Regular paragraph
+	if line != "" {
+		return &ADFNode{
+			Type:    "paragraph",
+			Content: parseInlineFormatting(line),
+		}
+	}
+
+	return nil
+}
+
+// parseInlineFormatting parses inline formatting (bold, italic, code, links) and returns ADF nodes.
+func parseInlineFormatting(text string) []ADFNode {
+	nodes := []ADFNode{}
+
+	// For simplicity, we'll handle basic text for now
+	// This could be expanded to handle complex inline formatting
+	if text == "" {
+		return nodes
+	}
+
+	// Handle inline code
+	if inlineCodeRegex.MatchString(text) {
+		parts := inlineCodeRegex.Split(text, -1)
+		matches := inlineCodeRegex.FindAllStringSubmatch(text, -1)
+
+		for i, part := range parts {
+			if part != "" {
+				nodes = append(nodes, ADFNode{
+					Type: "text",
+					Text: part,
+				})
+			}
+			if i < len(matches) {
+				nodes = append(nodes, ADFNode{
+					Type: "text",
+					Text: matches[i][1],
+					Marks: []ADFMark{
+						{Type: "code"},
+					},
+				})
+			}
+		}
+		return nodes
+	}
+
+	// Handle bold text
+	if boldRegex1.MatchString(text) || boldRegex2.MatchString(text) {
+		// Simple bold handling - could be expanded
+		text = boldRegex1.ReplaceAllString(text, "${1}")
+		text = boldRegex2.ReplaceAllString(text, "${1}")
+		return []ADFNode{
+			{
+				Type: "text",
+				Text: text,
+				Marks: []ADFMark{
+					{Type: "strong"},
+				},
+			},
+		}
+	}
+
+	// Handle italic text
+	if italicRegex1.MatchString(text) || italicRegex2.MatchString(text) {
+		text = italicRegex1.ReplaceAllString(text, "${1}")
+		text = italicRegex2.ReplaceAllString(text, "${1}")
+		return []ADFNode{
+			{
+				Type: "text",
+				Text: text,
+				Marks: []ADFMark{
+					{Type: "em"},
+				},
+			},
+		}
+	}
+
+	// Handle links
+	if linkRegex.MatchString(text) {
+		matches := linkRegex.FindAllStringSubmatch(text, -1)
+		if len(matches) > 0 {
+			linkText := matches[0][1]
+			linkURL := matches[0][2]
+			return []ADFNode{
+				{
+					Type: "text",
+					Text: linkText,
+					Marks: []ADFMark{
+						{
+							Type: "link",
+							Attrs: map[string]interface{}{
+								"href": linkURL,
+							},
+						},
+					},
+				},
+			}
+		}
+	}
+
+	// Plain text
+	return []ADFNode{
+		{
+			Type: "text",
+			Text: text,
+		},
+	}
+}
+
+// ConvertMarkdownFileToADF reads a markdown file and converts it to ADF format.
+func ConvertMarkdownFileToADF(filePath string) (*ADFDocument, error) {
+	contentBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("could not read file: %w", err)
+	}
+
+	return ConvertMarkdownStringToADF(string(contentBytes))
+}
+
+// ConvertMarkdownStringToADFJSON converts a markdown string to ADF JSON format.
+func ConvertMarkdownStringToADFJSON(markdown string) (string, error) {
+	adf, err := ConvertMarkdownStringToADF(markdown)
+	if err != nil {
+		return "", err
+	}
+
+	jsonBytes, err := json.MarshalIndent(adf, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("could not marshal ADF to JSON: %w", err)
+	}
+
+	return string(jsonBytes), nil
+}
+
+// ConvertMarkdownFileToADFJSON reads a markdown file and converts it to ADF JSON format.
+func ConvertMarkdownFileToADFJSON(filePath string) (string, error) {
+	adf, err := ConvertMarkdownFileToADF(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	jsonBytes, err := json.MarshalIndent(adf, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("could not marshal ADF to JSON: %w", err)
+	}
+
+	return string(jsonBytes), nil
+}
+
+// MarkdownToADFWriter converts a markdown file to ADF JSON and writes to the specified writer.
+func MarkdownToADFWriter(filePath string, writer io.Writer) error {
+	jsonResult, err := ConvertMarkdownFileToADFJSON(filePath)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintln(writer, jsonResult)
 	if err != nil {
 		return fmt.Errorf("could not write output: %w", err)
 	}
