@@ -209,6 +209,11 @@ type ADFMark struct {
 	Attrs map[string]interface{} `json:"attrs,omitempty"`
 }
 
+// convertFencedCodeBlocksToADF processes fenced code blocks and adds them to ADF document.
+func convertFencedCodeBlocksToADF(content string, doc *ADFDocument) string {
+	return content // Pass through without modification - we'll handle in main loop
+}
+
 // ConvertMarkdownStringToADF converts a markdown string to Atlassian Document Format (ADF).
 func ConvertMarkdownStringToADF(markdown string) (*ADFDocument, error) {
 	doc := &ADFDocument{
@@ -217,14 +222,65 @@ func ConvertMarkdownStringToADF(markdown string) (*ADFDocument, error) {
 		Content: []ADFNode{},
 	}
 
-	// Convert multiline elements first (code blocks)
-	convertedContent := convertMultilineElements(markdown)
-	lines := strings.Split(convertedContent, "\n")
+	// Split content into lines for processing
+	lines := strings.Split(markdown, "\n")
 
 	var currentParagraph *ADFNode
-	inCodeBlock := false
+	var inCodeBlock bool
+	var codeBlockLines []string
+	var codeBlockLang string
 
 	for _, line := range lines {
+		// Check for fenced code block start
+		if strings.HasPrefix(line, "```") {
+			if !inCodeBlock {
+				// Starting a code block
+				inCodeBlock = true
+				codeBlockLang = strings.TrimSpace(line[3:]) // Extract language
+				codeBlockLines = []string{}
+
+				// Finish any current paragraph
+				if currentParagraph != nil && len(currentParagraph.Content) > 0 {
+					doc.Content = append(doc.Content, *currentParagraph)
+					currentParagraph = nil
+				}
+				continue
+			} else {
+				// Ending a code block
+				inCodeBlock = false
+
+				// Create ADF code block
+				codeBlock := ADFNode{
+					Type: "codeBlock",
+					Content: []ADFNode{
+						{
+							Type: "text",
+							Text: strings.Join(codeBlockLines, "\n"),
+						},
+					},
+				}
+
+				// Add language attribute if present
+				if codeBlockLang != "" {
+					codeBlock.Attrs = map[string]interface{}{
+						"language": codeBlockLang,
+					}
+				}
+
+				doc.Content = append(doc.Content, codeBlock)
+				codeBlockLines = nil
+				codeBlockLang = ""
+				continue
+			}
+		}
+
+		if inCodeBlock {
+			// Collect code block content
+			codeBlockLines = append(codeBlockLines, line)
+			continue
+		}
+
+		// Process regular content
 		line = strings.TrimSpace(line)
 
 		// Handle empty lines
@@ -232,43 +288,6 @@ func ConvertMarkdownStringToADF(markdown string) (*ADFDocument, error) {
 			if currentParagraph != nil && len(currentParagraph.Content) > 0 {
 				doc.Content = append(doc.Content, *currentParagraph)
 				currentParagraph = nil
-			}
-			continue
-		}
-
-		// Track code block boundaries
-		if strings.HasPrefix(line, "{code") {
-			if currentParagraph != nil && len(currentParagraph.Content) > 0 {
-				doc.Content = append(doc.Content, *currentParagraph)
-				currentParagraph = nil
-			}
-			inCodeBlock = true
-			continue
-		}
-		if line == "{code}" {
-			inCodeBlock = false
-			continue
-		}
-
-		if inCodeBlock {
-			// Add code block content
-			if len(doc.Content) == 0 || doc.Content[len(doc.Content)-1].Type != "codeBlock" {
-				codeBlock := ADFNode{
-					Type: "codeBlock",
-					Content: []ADFNode{
-						{
-							Type: "text",
-							Text: line,
-						},
-					},
-				}
-				doc.Content = append(doc.Content, codeBlock)
-			} else {
-				// Append to existing code block
-				lastBlock := &doc.Content[len(doc.Content)-1]
-				if len(lastBlock.Content) > 0 {
-					lastBlock.Content[0].Text += "\n" + line
-				}
 			}
 			continue
 		}
