@@ -40,6 +40,17 @@ var (
 
 	// Fenced code block pattern
 	fencedCodeRegex = regexp.MustCompile("(?s)```(\\w+)?\\n(.*?)\\n```")
+
+	// Jira -> Markdown patterns
+	jiraCodeBlockRegex     = regexp.MustCompile(`(?s)\{code(?::([^}\n]+))?\}\n(.*?)\n\{code\}`)
+	jiraHeaderRegex        = regexp.MustCompile(`^h([1-6])\.\s+(.+)$`)
+	jiraOrderedListRegex   = regexp.MustCompile(`^(#{1,6})\s+(.+)$`)
+	jiraUnorderedListRegex = regexp.MustCompile(`^(-{1,6})\s+(.+)$`)
+	jiraInlineCodeRegex    = regexp.MustCompile(`\{\{([^{}]+)\}\}`)
+	jiraLinkRegex          = regexp.MustCompile(`\[(.*?)\|(.+?)\]`)
+	jiraBoldRegex          = regexp.MustCompile(`(^|[^[:alnum:]])\*([^*\n]+)\*([^[:alnum:]]|$)`)
+	jiraItalicRegex        = regexp.MustCompile(`(^|[^[:alnum:]])_([^_\n]+)_([^[:alnum:]]|$)`)
+	jiraStrikethroughRegex = regexp.MustCompile(`(^|[^[:alnum:]])-([[:alnum:]][^-\n]*[[:alnum:]])-([^[:alnum:]]|$)`)
 )
 
 // convertLine converts a single markdown line to Jira markup.
@@ -180,6 +191,135 @@ func MarkdownToJiraWriter(filePath string, writer io.Writer) error {
 	}
 
 	result := ConvertMarkdownString(string(contentBytes))
+	_, err = fmt.Fprintln(writer, result)
+	if err != nil {
+		return fmt.Errorf("could not write output: %w", err)
+	}
+
+	return nil
+}
+
+// convertJiraMultilineElements converts Jira code blocks to fenced Markdown code blocks.
+func convertJiraMultilineElements(content string) string {
+	return jiraCodeBlockRegex.ReplaceAllStringFunc(content, processJiraCodeBlock)
+}
+
+// processJiraCodeBlock converts a Jira code block to fenced Markdown format.
+func processJiraCodeBlock(match string) string {
+	matches := jiraCodeBlockRegex.FindStringSubmatch(match)
+	if len(matches) < 3 {
+		return match // Safety fallback
+	}
+
+	lang := matches[1]
+	code := matches[2]
+
+	if lang != "" {
+		return fmt.Sprintf("```%s\n%s\n```", lang, code)
+	}
+	return fmt.Sprintf("```\n%s\n```", code)
+}
+
+// convertJiraInline converts Jira inline markup to Markdown inline markup.
+func convertJiraInline(line string) string {
+	const inlineCodePlaceholder = "__INLINE_CODE__"
+	var inlineCodeBlocks []string
+
+	line = jiraInlineCodeRegex.ReplaceAllStringFunc(line, func(match string) string {
+		codeContent := jiraInlineCodeRegex.FindStringSubmatch(match)[1]
+		inlineCodeBlocks = append(inlineCodeBlocks, "`"+codeContent+"`")
+		return inlineCodePlaceholder + fmt.Sprintf("%d", len(inlineCodeBlocks)-1) + inlineCodePlaceholder
+	})
+
+	line = jiraLinkRegex.ReplaceAllString(line, "[${1}](${2})")
+	line = jiraBoldRegex.ReplaceAllString(line, "${1}**${2}**${3}")
+	line = jiraItalicRegex.ReplaceAllString(line, "${1}_${2}_${3}")
+	line = jiraStrikethroughRegex.ReplaceAllString(line, "${1}~~${2}~~${3}")
+
+	for i, codeBlock := range inlineCodeBlocks {
+		placeholder := inlineCodePlaceholder + fmt.Sprintf("%d", i) + inlineCodePlaceholder
+		line = strings.ReplaceAll(line, placeholder, codeBlock)
+	}
+
+	return line
+}
+
+// convertJiraLine converts a single Jira wiki line to Markdown.
+func convertJiraLine(line string) string {
+	if matches := jiraOrderedListRegex.FindStringSubmatch(line); len(matches) == 3 {
+		depth := len(matches[1]) - 1
+		if depth < 0 {
+			depth = 0
+		}
+		indent := strings.Repeat("    ", depth)
+		return indent + "1. " + convertJiraInline(matches[2])
+	}
+
+	if matches := jiraUnorderedListRegex.FindStringSubmatch(line); len(matches) == 3 {
+		depth := len(matches[1]) - 1
+		if depth < 0 {
+			depth = 0
+		}
+		indent := strings.Repeat("    ", depth)
+		return indent + "- " + convertJiraInline(matches[2])
+	}
+
+	if matches := jiraHeaderRegex.FindStringSubmatch(line); len(matches) == 3 {
+		level := matches[1]
+		text := matches[2]
+		return strings.Repeat("#", int(level[0]-'0')) + " " + convertJiraInline(text)
+	}
+
+	return convertJiraInline(line)
+}
+
+// ConvertJiraString converts Jira wiki markup string to Markdown.
+func ConvertJiraString(jira string) string {
+	convertedContent := convertJiraMultilineElements(jira)
+	lines := strings.Split(convertedContent, "\n")
+	markdownLines := make([]string, 0, len(lines))
+
+	inCodeBlock := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "```") {
+			inCodeBlock = !inCodeBlock
+			markdownLines = append(markdownLines, line)
+			continue
+		}
+
+		if !inCodeBlock {
+			line = convertJiraLine(line)
+		}
+
+		markdownLines = append(markdownLines, line)
+	}
+
+	return strings.Join(markdownLines, "\n")
+}
+
+// ConvertJiraFile reads a Jira wiki file and returns converted Markdown as a string.
+func ConvertJiraFile(filePath string) (string, error) {
+	contentBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("could not read file: %w", err)
+	}
+
+	return ConvertJiraString(string(contentBytes)), nil
+}
+
+// JiraToMarkdown reads a Jira wiki file, converts content to Markdown, and prints it.
+func JiraToMarkdown(filePath string) error {
+	return JiraToMarkdownWriter(filePath, os.Stdout)
+}
+
+// JiraToMarkdownWriter converts a Jira wiki file to Markdown and writes to the specified writer.
+func JiraToMarkdownWriter(filePath string, writer io.Writer) error {
+	contentBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("could not read file: %w", err)
+	}
+
+	result := ConvertJiraString(string(contentBytes))
 	_, err = fmt.Fprintln(writer, result)
 	if err != nil {
 		return fmt.Errorf("could not write output: %w", err)
