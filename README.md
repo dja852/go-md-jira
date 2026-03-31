@@ -1,11 +1,12 @@
 # go-md-jira
 
-A Go library and command-line tool for converting Markdown to Jira markup format. Inspired by https://github.com/eshack94/md-to-jira
+A Go library and command-line tool for converting between Markdown and Jira wiki markup. Inspired by https://github.com/eshack94/md-to-jira
 
 ## Features
 
 - **Fast Performance**: Pre-compiled regex patterns for optimal conversion speed
 - **Comprehensive Conversion**: Headers, lists, text formatting, code blocks, and links
+- **Bidirectional Conversion**: Markdown -> Jira wiki and Jira wiki -> Markdown
 - **Smart Protection**: Placeholder-based system prevents formatting conflicts
 - **Nested Lists**: Proper handling of multi-level ordered and unordered lists
 - **Code Block Support**: Fenced code blocks with optional language specification
@@ -20,12 +21,16 @@ A Go library and command-line tool for converting Markdown to Jira markup format
 git clone https://github.com/dja852/go-md-jira.git
 cd go-md-jira
 
-# Convert a markdown file
+# Convert a markdown file to Jira wiki (default direction)
 go run ./cmd input.md
+
+# Convert Jira wiki to Markdown
+go run ./cmd -d jira-to-md input.jira
 
 # Or build and run
 go build -o md2jira ./cmd
 ./md2jira input.md
+./md2jira -d jira-to-md input.jira
 ```
 
 ### Library Usage
@@ -61,6 +66,16 @@ This is **bold** and _italic_ text with {{inline code}}.
     
     // Convert markdown file and print to stdout
     if err := gomdjira.MarkdownToJira("input.md"); err != nil {
+        log.Fatal(err)
+    }
+
+    // Convert Jira wiki string directly
+    jiraInput := "h1. Header\n\n# Ordered item"
+    md := gomdjira.ConvertJiraString(jiraInput)
+    fmt.Println(md)
+
+    // Convert Jira wiki file and print Markdown to stdout
+    if err := gomdjira.JiraToMarkdown("input.jira"); err != nil {
         log.Fatal(err)
     }
 }
@@ -174,6 +189,18 @@ Converts a markdown file and writes output to a custom writer.
 
 **Returns:**
 - Error if file operations fail, nil on success
+
+#### `ConvertJiraString(jira string) string`
+Converts a Jira wiki string directly to Markdown.
+
+#### `ConvertJiraFile(filePath string) (string, error)`
+Reads a Jira wiki file and returns converted Markdown as a string.
+
+#### `JiraToMarkdown(filePath string) error`
+Reads a Jira wiki file and prints converted Markdown to stdout.
+
+#### `JiraToMarkdownWriter(inputPath string, writer io.Writer) error`
+Converts a Jira wiki file and writes Markdown to a custom writer.
 
 ## Regular Expression Patterns
 
