@@ -31,6 +31,7 @@ var (
 	inlineCodeRegex    = regexp.MustCompile("`([^`]+)`")
 	strikethroughRegex = regexp.MustCompile(`~~(.+?)~~`)
 	linkRegex          = regexp.MustCompile(`\[(.*?)\]\((.+?)\)`)
+	bareLinkRegex      = regexp.MustCompile(`<(.+?)>`)
 	orderedListRegex   = regexp.MustCompile(`^\d+\.\s+`)
 	unorderedListRegex = regexp.MustCompile(`^\*\s+`)
 
@@ -86,6 +87,7 @@ func convertLine(line string) string {
 	// Other formatting
 	line = strikethroughRegex.ReplaceAllString(line, "-${1}-")
 	line = linkRegex.ReplaceAllString(line, "[${1}|${2}]")
+	line = bareLinkRegex.ReplaceAllString(line, "[${1}|${1}]")
 
 	// List processing (nested lists first, then top-level)
 	line = nestedOrderedListRegex.ReplaceAllStringFunc(line, func(match string) string {
