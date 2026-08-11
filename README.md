@@ -101,6 +101,8 @@ go get github.com/dja852/go-md-jira
 | `- Item` | `- Item` | Unordered lists |
 | ` - Nested` | `-- Nested` | Nested lists (4-space indentation) |
 
+A single blank line between Markdown list items is omitted from Jira output so the list remains continuous. Two or more blank lines are preserved as an intentional list break.
+
 ### Complex Example
 
 **Markdown Input:**

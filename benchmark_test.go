@@ -107,6 +107,54 @@ func TestInlineCodeInLists(t *testing.T) {
 	}
 }
 
+func TestConvertMarkdownStringLooseLists(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "ordered items",
+			input:    "1. One\n\n2. Two",
+			expected: "# One\n# Two",
+		},
+		{
+			name:     "unordered items with whitespace-only blank",
+			input:    "* One\n \t\n- Two",
+			expected: "- One\n- Two",
+		},
+		{
+			name:     "mixed nested items",
+			input:    "1. One\n\n    - Nested\n\n2. Two",
+			expected: "# One\n-- Nested\n# Two",
+		},
+		{
+			name:     "multiple blank lines are preserved",
+			input:    "1. One\n\n\n2. Two",
+			expected: "# One\n\n\n# Two",
+		},
+		{
+			name:     "blank lines around prose are preserved",
+			input:    "1. One\n\nParagraph\n\n2. Two",
+			expected: "# One\n\nParagraph\n\n# Two",
+		},
+		{
+			name:     "blank line between list-like code lines is preserved",
+			input:    "```\n1. code\n\n2. code\n```",
+			expected: "{code}\n1. code\n\n2. code\n{code}",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ConvertMarkdownString(tc.input)
+			if got != tc.expected {
+				t.Fatalf("expected %q, got %q", tc.expected, got)
+			}
+		})
+	}
+}
+
 func TestConvertMarkdownFile(t *testing.T) {
 	// Test with the existing test.md file
 	result, err := ConvertMarkdownFile("test.md")

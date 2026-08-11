@@ -141,33 +141,56 @@ func processCodeBlock(match string) string {
 	return fmt.Sprintf("{code}\n%s\n{code}", code)
 }
 
+type convertedMarkdownLine struct {
+	text       string
+	isListItem bool
+}
+
+func isJiraListItem(line string) bool {
+	return jiraOrderedListRegex.MatchString(line) || jiraUnorderedListRegex.MatchString(line)
+}
+
+func removeSingleBlankLinesBetweenListItems(lines []convertedMarkdownLine) []string {
+	normalizedLines := make([]string, 0, len(lines))
+	for i, line := range lines {
+		isSingleListBlank := strings.TrimSpace(line.text) == "" &&
+			i > 0 && i+1 < len(lines) &&
+			lines[i-1].isListItem && lines[i+1].isListItem
+		if isSingleListBlank {
+			continue
+		}
+
+		normalizedLines = append(normalizedLines, line.text)
+	}
+
+	return normalizedLines
+}
+
 // ConvertMarkdownString converts a markdown string to Jira markup.
 func ConvertMarkdownString(markdown string) string {
 	convertedContent := convertMultilineElements(markdown)
 	lines := strings.Split(convertedContent, "\n")
-	jiraLines := make([]string, 0, len(lines))
+	jiraLines := make([]convertedMarkdownLine, 0, len(lines))
 
 	inCodeBlock := false
 	for _, line := range lines {
 		// Track code block boundaries to avoid processing content inside them
 		if strings.HasPrefix(line, "{code") && (strings.HasSuffix(line, "}") || line == "{code}") {
-			if line == "{code}" {
-				inCodeBlock = false
-			} else {
-				inCodeBlock = true
-			}
-			jiraLines = append(jiraLines, line)
+			inCodeBlock = !inCodeBlock
+			jiraLines = append(jiraLines, convertedMarkdownLine{text: line})
 			continue
 		}
 
 		// Only apply line conversions if we're not in a code block
+		listItem := false
 		if !inCodeBlock {
 			line = convertLine(line)
+			listItem = isJiraListItem(line)
 		}
-		jiraLines = append(jiraLines, line)
+		jiraLines = append(jiraLines, convertedMarkdownLine{text: line, isListItem: listItem})
 	}
 
-	return strings.Join(jiraLines, "\n")
+	return strings.Join(removeSingleBlankLinesBetweenListItems(jiraLines), "\n")
 }
 
 // ConvertMarkdownFile reads a markdown file and returns the converted Jira markup as a string.
